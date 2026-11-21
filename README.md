@@ -5,10 +5,10 @@ A lightweight **Windows 11** **WinUI 3** utility for dynamic per-application net
 ## Screenshots
 
 ### Priorities
-[https://raw.githubusercontent.com/itigotempest/netprio/refs/heads/main/NetPrio_main_tab.png]
+[NetPrio_main_tab.png]
 
 ### Channel & Rules
-[https://raw.githubusercontent.com/itigotempest/netprio/refs/heads/main/NetPrio_settings_tab.png]
+[NetPrio_settings_tab.png]
 
 ## Features
 - **3 Priority Tiers (`Highest` / `Medium` / `Low`)**: Move `.exe` processes between tiers or pick from running processes.
@@ -25,3 +25,6 @@ A lightweight **Windows 11** **WinUI 3** utility for dynamic per-application net
 ```powershell
 dotnet build -c Release -p:Platform=x64
 dotnet run -c Release -p:Platform=x64
+```
+
+Configuration is stored in `%APPDATA%\NetPrio\config.json`.
