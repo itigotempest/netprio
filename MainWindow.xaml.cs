@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -54,13 +55,13 @@ public sealed partial class MainWindow : Window
             if (!_forceClose)
             {
                 args.Cancel = true;
-                AppWindow.Hide();
+                HideAndTrimToTray();
             }
         };
         AppWindow.Changed += (_, args) =>
         {
             if (args.DidPresenterChange && AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized })
-                AppWindow.Hide();
+                HideAndTrimToTray();
         };
 
         _shaper.StatusChanged += _ => DispatcherQueue.TryEnqueue(() =>
@@ -68,7 +69,7 @@ public sealed partial class MainWindow : Window
             StatusBanner.Title = _shaper.IsRunning ? T("StatusActive") : T("StatusStopped");
             ToggleShaperBtn.Content = _shaper.IsRunning ? T("StopShaper") : T("StartShaper");
         });
-        _shaper.StatsUpdated += stats => DispatcherQueue.TryEnqueue(() =>
+        _shaper.StatsUpdated += stats => { if (!AppWindow.IsVisible) return; DispatcherQueue.TryEnqueue(() =>
         {
             string mbps = T("Mbps");
             string lowLimitStr = stats.IsLowCapped ? $"{T("Limit")} {stats.LowLimitMbps} {mbps}" : T("NoLimit");
@@ -77,7 +78,7 @@ public sealed partial class MainWindow : Window
                 $"{T("TierHigh")}: {stats.HighMbps} {mbps}  |  " +
                 $"{T("TierMed")}: {stats.MedMbps} {mbps}{medLimitStr}  |  " +
                 $"{T("TierLow")}: {stats.LowMbps} {mbps} ({lowLimitStr})";
-        });
+        }); };
 
         HighestList.ItemsSource = _config.HighestApps;
         MediumList.ItemsSource = _config.MediumApps;
@@ -98,7 +99,7 @@ public sealed partial class MainWindow : Window
 
         if (startMinimized)
         {
-            AppWindow.Hide();
+            HideAndTrimToTray();
             _shaper.Start();
         }
     }
@@ -265,4 +266,18 @@ public sealed partial class MainWindow : Window
         _config.Save();
         StatusBanner.Message = $"{T("Saved")} ({_config.ChannelDownloadMbps} {T("Mbps")})";
     }
+
+    private void HideAndTrimToTray()
+    {
+        AppWindow.Hide();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        SetProcessWorkingSetSize(GetCurrentProcess(), new IntPtr(-1), new IntPtr(-1));
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetProcessWorkingSetSize(IntPtr hProcess, IntPtr dwMinimumWorkingSetSize, IntPtr dwMaximumWorkingSetSize);
 }

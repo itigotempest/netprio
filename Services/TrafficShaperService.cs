@@ -17,6 +17,7 @@ public record TrafficStats(
 public class TrafficShaperService
 {
     private const ulong WINDIVERT_FLAG_SNIFF = 1;
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
 
     private readonly PriorityConfig _config;
     private CancellationTokenSource? _cts;
@@ -63,7 +64,6 @@ public class TrafficShaperService
             return;
         }
 
-        // Отдельный SNIFF-хэндл для отслеживания приложений, работающих через локальный прокси (127.0.0.1)
         _loopbackSniffHandle = WinDivertNative.WinDivertOpen(
             "loopback and ip and (tcp or udp)",
             WinDivertNative.WINDIVERT_LAYER_NETWORK,
@@ -106,20 +106,51 @@ public class TrafficShaperService
         {
             try
             {
-                var runningNames = Process.GetProcesses()
-                    .Select(p => { try { return p.ProcessName + ".exe"; } catch { return ""; } })
-                    .Where(n => n.Length > 0)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var (pidMap, runningNames) = GetProcessSnapshot();
 
                 _highProcessRunning = _config.HighestApps.Any(a => runningNames.Contains(a));
                 _medProcessRunning = _config.MediumApps.Any(a => runningNames.Contains(a));
 
-                RefreshPortMaps();
+                _tcpPortMap = ReadTcpTable(pidMap);
+                _udpPortMap = ReadUdpTable(pidMap);
             }
             catch { /* ignore transient errors */ }
 
-            await Task.Delay(1500, ct);
+            await Task.Delay(2000, ct);
         }
+    }
+
+    private static (Dictionary<int, string> PidMap, HashSet<string> Names) GetProcessSnapshot()
+    {
+        var pidMap = new Dictionary<int, string>(128);
+        var names = new HashSet<string>(64, StringComparer.OrdinalIgnoreCase);
+
+        IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == IntPtr.Zero || snap == new IntPtr(-1))
+            return (pidMap, names);
+
+        try
+        {
+            var entry = new PROCESSENTRY32W { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32W>() };
+            if (Process32FirstW(snap, ref entry))
+            {
+                do
+                {
+                    if (!string.IsNullOrEmpty(entry.szExeFile))
+                    {
+                        pidMap[(int)entry.th32ProcessID] = entry.szExeFile;
+                        names.Add(entry.szExeFile);
+                    }
+                }
+                while (Process32NextW(snap, ref entry));
+            }
+        }
+        finally
+        {
+            CloseHandle(snap);
+        }
+
+        return (pidMap, names);
     }
 
     private async Task AdaptiveControlLoopAsync(CancellationToken ct)
@@ -187,9 +218,9 @@ public class TrafficShaperService
             _currentMedBytesPerSec = capMed ? (currentMedMbps * 1_000_000.0) / 8.0 : double.MaxValue;
             _currentLowBytesPerSec = capLow ? (currentLowMbps * 1_000_000.0) / 8.0 : double.MaxValue;
 
-            if (tick % 2 == 0)
+            if (tick % 2 == 0 && StatsUpdated != null)
             {
-                StatsUpdated?.Invoke(new TrafficStats(
+                StatsUpdated.Invoke(new TrafficStats(
                     Math.Round(emaHigh, 1),
                     Math.Round(emaMed, 1),
                     Math.Round(instLow, 1),
@@ -314,18 +345,6 @@ public class TrafficShaperService
         return null;
     }
 
-    private void RefreshPortMaps()
-    {
-        var pidToName = new Dictionary<int, string>();
-        foreach (var p in Process.GetProcesses())
-        {
-            try { pidToName[p.Id] = p.ProcessName + ".exe"; } catch { }
-        }
-
-        _tcpPortMap = ReadTcpTable(pidToName);
-        _udpPortMap = ReadUdpTable(pidToName);
-    }
-
     private static ConcurrentDictionary<int, string> ReadTcpTable(Dictionary<int, string> pidMap)
     {
         var result = new ConcurrentDictionary<int, string>();
@@ -377,6 +396,34 @@ public class TrafficShaperService
         finally { Marshal.FreeHGlobal(buffer); }
         return result;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PROCESSENTRY32W
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool Process32FirstW(IntPtr hSnapshot, ref PROCESSENTRY32W lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool Process32NextW(IntPtr hSnapshot, ref PROCESSENTRY32W lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern uint GetExtendedTcpTable(IntPtr pTcpTable, ref int dwOutBufLen, bool sort, int ipVersion, int tblClass, uint reserved);
