@@ -18,7 +18,7 @@ public sealed partial class MainWindow : Window
     private bool _forceClose;
     private bool _isInitializing = true;
 
-    public MainWindow()
+    public MainWindow(bool startMinimized = false)
     {
         InitializeComponent();
         _config = PriorityConfig.Load();
@@ -49,7 +49,6 @@ public sealed partial class MainWindow : Window
             Close();
         });
 
-        // Сворачивать в трей и по крестику, и по кнопке минимизации
         AppWindow.Closing += (_, args) =>
         {
             if (!_forceClose)
@@ -84,6 +83,7 @@ public sealed partial class MainWindow : Window
         MediumList.ItemsSource = _config.MediumApps;
         LowList.ItemsSource = _config.LowApps;
 
+        AutoStartToggle.IsOn = StartupTaskService.IsEnabled();
         AutoSpeedToggle.IsOn = _config.AutoMeasureSpeed;
         DownloadBox.Value = _config.ChannelDownloadMbps;
         UploadBox.Value = _config.ChannelUploadMbps;
@@ -95,6 +95,12 @@ public sealed partial class MainWindow : Window
         _isInitializing = false;
 
         ApplyLocalization();
+
+        if (startMinimized)
+        {
+            AppWindow.Hide();
+            _shaper.Start();
+        }
     }
 
     private string T(string key) => LocalizationService.Get(key, _config.Language);
@@ -117,6 +123,7 @@ public sealed partial class MainWindow : Window
 
         LanguageBox.Header = T("LangHeader");
         LangAutoItem.Content = T("LangAuto");
+        AutoStartToggle.Header = T("AutoStartHeader");
         AutoSpeedToggle.Header = T("AutoSpeedHeader");
         DownloadBox.Header = T("DownloadHeader");
         UploadBox.Header = T("UploadHeader");
@@ -126,6 +133,12 @@ public sealed partial class MainWindow : Window
         ExcludeVpnToggle.Header = T("ExcludeVpnHeader");
         SaveSettingsBtn.Content = T("SaveSettings");
         _tray.UpdateTooltip(T("AppTitle"));
+    }
+
+    private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing) return;
+        StartupTaskService.SetEnabled(AutoStartToggle.IsOn);
     }
 
     private void LanguageBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

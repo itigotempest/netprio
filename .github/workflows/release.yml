@@ -24,17 +24,22 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish WinUI 3 app (x64)
+      - name: Publish Framework-Dependent (x64)
         run: |
-          dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained false -o ./publish
+          dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained false -o ./publish-fdd
 
-      - name: Package release archive
+      - name: Publish Self-Contained (x64)
+        run: |
+          dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true -o ./publish-sc
+
+      - name: Package release archives
         shell: pwsh
         run: |
           $dateTag = Get-Date -Format "yyyy.MM.dd"
           $version = "v$dateTag-${{ github.run_number }}"
           echo "RELEASE_TAG=$version" >> $env:GITHUB_ENV
-          Compress-Archive -Path ./publish/* -DestinationPath "./NetPrio-$version-win-x64.zip" -Force
+          Compress-Archive -Path ./publish-fdd/* -DestinationPath "./NetPrio-$version-win-x64.zip" -Force
+          Compress-Archive -Path ./publish-sc/* -DestinationPath "./NetPrio-$version-win-x64-self-contained.zip" -Force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -43,5 +48,14 @@ jobs:
           name: "NetPrio ${{ env.RELEASE_TAG }}"
           body: |
             Automated build for `${{ env.RELEASE_TAG }}`.
-            Note: Download `WinDivert.dll` and `WinDivert64.sys` (WinDivert 2.2 x64) and place them next to `NetPrio.exe`.
-          files: ./NetPrio-*-win-x64.zip
+
+            **Requirements:**
+            - **Windows 11 (x64)** strictly (build 22000+)
+            - Administrator privileges (for WinDivert)
+
+            **Which archive to download:**
+            - `NetPrio-*-win-x64.zip` — smaller build (requires **.NET 10 Desktop Runtime (x64)**)
+            - `NetPrio-*-win-x64-self-contained.zip` — standalone build (includes .NET runtime, no extra installs needed)
+
+            `WinDivert.dll` and `WinDivert64.sys` are included in both archives.
+          files: ./NetPrio-*.zip

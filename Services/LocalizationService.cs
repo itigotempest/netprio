@@ -32,6 +32,7 @@ public static class LocalizationService
         ["CancelBtn"] = ("Отмена", "Cancel"),
         ["LangHeader"] = ("Язык интерфейса", "Interface Language"),
         ["LangAuto"] = ("Авто (язык системы)", "Auto (System)"),
+        ["AutoStartHeader"] = ("Запускать с Windows в трее (без окна UAC, через Планировщик)", "Start minimized to tray with Windows (no UAC, via Task Scheduler)"),
         ["AutoSpeedHeader"] = ("Автоматически замерять скорость канала при старте", "Auto-measure channel speed on startup"),
         ["DownloadHeader"] = ("Download (Мбит/с)", "Download (Mbps)"),
         ["UploadHeader"] = ("Upload (Мбит/с)", "Upload (Mbps)"),

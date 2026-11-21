@@ -145,6 +145,7 @@
                     <ComboBoxItem Content="Русский" Tag="ru" />
                     <ComboBoxItem Content="English" Tag="en" />
                 </ComboBox>
+                <ToggleSwitch x:Name="AutoStartToggle" IsOn="False" Toggled="AutoStartToggle_Toggled" />
                 <ToggleSwitch x:Name="AutoSpeedToggle" IsOn="True" />
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <NumberBox x:Name="DownloadBox" Value="100" Minimum="1" SpinButtonPlacementMode="Inline" Width="180" />
