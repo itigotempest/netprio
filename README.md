@@ -5,10 +5,10 @@ A lightweight **Windows 11** **WinUI 3** utility for dynamic per-application net
 ## Screenshots
 
 ### Priorities
-[NetPrio_main_tab.png]
+![NetPrio Priorities Tab](NetPrio_main_tab.png)
 
 ### Channel & Rules
-[NetPrio_settings_tab.png]
+![NetPrio Settings Tab](NetPrio_settings_tab.png)
 
 ## Features
 - **3 Priority Tiers (`Highest` / `Medium` / `Low`)**: Move `.exe` processes between tiers or pick from running processes.
