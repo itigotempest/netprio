@@ -97,6 +97,20 @@ public class TrafficShaperService
         _cts = null;
         _currentLowBytesPerSec = double.MaxValue;
         _currentMedBytesPerSec = double.MaxValue;
+
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                Arguments = "stop WinDivert",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+            p?.WaitForExit(2000);
+        }
+        catch { /* ignore if another app holds WinDivert */ }
+
         StatusChanged?.Invoke("Шейпер остановлен");
     }
 
@@ -165,6 +179,8 @@ public class TrafficShaperService
         {
             await Task.Delay(250, ct);
             tick++;
+            try
+            {
 
             long hb = Interlocked.Exchange(ref _highBytesWindow, 0);
             long mb = Interlocked.Exchange(ref _medBytesWindow, 0);
@@ -199,7 +215,7 @@ public class TrafficShaperService
             else if (highBusy || emaMed > 0.35)
             {
                 double headroomUsed = (emaHigh * 1.30) + (emaMed * 1.15);
-                lowTarget = Math.Clamp(maxLowCeiling - headroomUsed, floor, maxLowCeiling);
+                lowTarget = Math.Clamp(maxLowCeiling - headroomUsed, Math.Min(floor, maxLowCeiling), maxLowCeiling);
             }
 
             double stepUp = total * 0.04;
@@ -218,9 +234,9 @@ public class TrafficShaperService
             _currentMedBytesPerSec = capMed ? (currentMedMbps * 1_000_000.0) / 8.0 : double.MaxValue;
             _currentLowBytesPerSec = capLow ? (currentLowMbps * 1_000_000.0) / 8.0 : double.MaxValue;
 
-            if (tick % 2 == 0 && StatsUpdated != null)
+            if (tick % 2 == 0)
             {
-                StatsUpdated.Invoke(new TrafficStats(
+                StatsUpdated?.Invoke(new TrafficStats(
                     Math.Round(emaHigh, 1),
                     Math.Round(emaMed, 1),
                     Math.Round(instLow, 1),
@@ -229,115 +245,174 @@ public class TrafficShaperService
                     capLow,
                     capMed));
             }
+            }
+            catch (OperationCanceledException) { break; }
+            catch { /* keep telemetry loop alive */ }
         }
     }
 
     private void LoopbackSniffLoop(CancellationToken ct)
     {
-        var packet = new byte[65535];
+        const int maxBatch = 64;
+        var packetBuf = new byte[maxBatch * 2048];
+        var addrs = new WinDivertNative.WINDIVERT_ADDRESS[maxBatch];
+
         while (!ct.IsCancellationRequested && _loopbackSniffHandle != WinDivertNative.INVALID_HANDLE_VALUE)
         {
-            if (!WinDivertNative.WinDivertRecv(_loopbackSniffHandle, packet, (uint)packet.Length, out uint recvLen, out _))
+            uint addrLen = (uint)(maxBatch * WinDivertNative.ADDR_SIZE);
+            if (!WinDivertNative.WinDivertRecvEx(_loopbackSniffHandle, packetBuf, (uint)packetBuf.Length, out uint recvLen, 0, addrs, ref addrLen, IntPtr.Zero))
                 break;
 
-            if (recvLen < 24) continue;
-            int ihl = (packet[0] & 0x0F) * 4;
-            byte proto = packet[9];
-            if (recvLen < ihl + 4) continue;
+            int count = (int)(addrLen / WinDivertNative.ADDR_SIZE);
+            int offset = 0;
 
-            int srcPort = (packet[ihl] << 8) | packet[ihl + 1];
-            int dstPort = (packet[ihl + 2] << 8) | packet[ihl + 3];
-
-            var map = proto == 6 ? _tcpPortMap : (proto == 17 ? _udpPortMap : null);
-            if (map == null) continue;
-
-            map.TryGetValue(srcPort, out var srcExe);
-            map.TryGetValue(dstPort, out var dstExe);
-
-            if ((srcExe != null && _config.HighestApps.Contains(srcExe, StringComparer.OrdinalIgnoreCase)) ||
-                (dstExe != null && _config.HighestApps.Contains(dstExe, StringComparer.OrdinalIgnoreCase)))
+            for (int i = 0; i < count && offset + 24 <= recvLen; i++)
             {
-                Interlocked.Add(ref _highBytesWindow, recvLen);
-            }
-            else if ((srcExe != null && _config.MediumApps.Contains(srcExe, StringComparer.OrdinalIgnoreCase)) ||
-                     (dstExe != null && _config.MediumApps.Contains(dstExe, StringComparer.OrdinalIgnoreCase)))
-            {
-                Interlocked.Add(ref _medBytesWindow, recvLen);
+                int pktLen = (packetBuf[offset + 2] << 8) | packetBuf[offset + 3];
+                if (pktLen < 24 || offset + pktLen > recvLen) break;
+
+                int ihl = (packetBuf[offset] & 0x0F) * 4;
+                byte proto = packetBuf[offset + 9];
+                if (pktLen >= ihl + 4)
+                {
+                    int srcPort = (packetBuf[offset + ihl] << 8) | packetBuf[offset + ihl + 1];
+                    int dstPort = (packetBuf[offset + ihl + 2] << 8) | packetBuf[offset + ihl + 3];
+
+                    var map = proto == 6 ? _tcpPortMap : (proto == 17 ? _udpPortMap : null);
+                    if (map != null)
+                    {
+                        map.TryGetValue(srcPort, out var srcExe);
+                        map.TryGetValue(dstPort, out var dstExe);
+
+                        if ((srcExe != null && _config.HighestApps.Contains(srcExe, StringComparer.OrdinalIgnoreCase)) ||
+                            (dstExe != null && _config.HighestApps.Contains(dstExe, StringComparer.OrdinalIgnoreCase)))
+                        {
+                            Interlocked.Add(ref _highBytesWindow, pktLen);
+                        }
+                        else if ((srcExe != null && _config.MediumApps.Contains(srcExe, StringComparer.OrdinalIgnoreCase)) ||
+                                 (dstExe != null && _config.MediumApps.Contains(dstExe, StringComparer.OrdinalIgnoreCase)))
+                        {
+                            Interlocked.Add(ref _medBytesWindow, pktLen);
+                        }
+                    }
+                }
+                offset += pktLen;
             }
         }
     }
 
     private void PacketLoop(CancellationToken ct)
     {
-        var packet = new byte[65535];
+        const int maxBatch = 64;
+        var recvBuf = new byte[maxBatch * 2048];
+        var sendBuf = new byte[maxBatch * 2048];
+        var recvAddrs = new WinDivertNative.WINDIVERT_ADDRESS[maxBatch];
+        var sendAddrs = new WinDivertNative.WINDIVERT_ADDRESS[maxBatch];
+
+        var sendPin = GCHandle.Alloc(sendBuf, GCHandleType.Pinned);
+        IntPtr sendBasePtr = sendPin.AddrOfPinnedObject();
+
         double lowTokens = 1_000_000;
         double medTokens = 1_000_000;
         var sw = Stopwatch.StartNew();
         double lastSec = sw.Elapsed.TotalSeconds;
 
-        while (!ct.IsCancellationRequested && _divertHandle != WinDivertNative.INVALID_HANDLE_VALUE)
+        try
         {
-            if (!WinDivertNative.WinDivertRecv(_divertHandle, packet, (uint)packet.Length, out uint recvLen, out var addr))
-                break;
-
-            double now = sw.Elapsed.TotalSeconds;
-            double dt = now - lastSec;
-            lastSec = now;
-
-            double lowLimit = _currentLowBytesPerSec;
-            double medLimit = _currentMedBytesPerSec;
-
-            if (lowLimit < double.MaxValue)
-                lowTokens = Math.Min(lowLimit, lowTokens + dt * lowLimit);
-            if (medLimit < double.MaxValue)
-                medTokens = Math.Min(medLimit, medTokens + dt * medLimit);
-
-            bool shouldDrop = false;
-            var ownerExe = IdentifyProcessFromPacket(packet, (int)recvLen, addr.IsOutbound);
-
-            if (ownerExe != null)
+            while (!ct.IsCancellationRequested && _divertHandle != WinDivertNative.INVALID_HANDLE_VALUE)
             {
-                if (_config.HighestApps.Contains(ownerExe, StringComparer.OrdinalIgnoreCase))
+                uint addrLen = (uint)(maxBatch * WinDivertNative.ADDR_SIZE);
+                if (!WinDivertNative.WinDivertRecvEx(_divertHandle, recvBuf, (uint)recvBuf.Length, out uint recvLen, 0, recvAddrs, ref addrLen, IntPtr.Zero))
+                    break;
+
+                double now = sw.Elapsed.TotalSeconds;
+                double dt = now - lastSec;
+                lastSec = now;
+
+                double lowLimit = _currentLowBytesPerSec;
+                double medLimit = _currentMedBytesPerSec;
+
+                if (lowLimit < double.MaxValue)
+                    lowTokens = Math.Min(lowLimit, lowTokens + dt * lowLimit);
+                if (medLimit < double.MaxValue)
+                    medTokens = Math.Min(medLimit, medTokens + dt * medLimit);
+
+                bool skipChecksum = _config.SkipChecksumRecalc;
+                int count = (int)(addrLen / WinDivertNative.ADDR_SIZE);
+                int recvOffset = 0;
+                int sendOffset = 0;
+                int sendCount = 0;
+
+                for (int i = 0; i < count && recvOffset + 24 <= recvLen; i++)
                 {
-                    Interlocked.Add(ref _highBytesWindow, recvLen);
-                }
-                else if (_config.MediumApps.Contains(ownerExe, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (medLimit < double.MaxValue)
+                    int pktLen = (recvBuf[recvOffset + 2] << 8) | recvBuf[recvOffset + 3];
+                    if (pktLen < 24 || recvOffset + pktLen > recvLen) break;
+
+                    bool shouldDrop = false;
+                    var ownerExe = IdentifyProcessFromPacket(recvBuf, recvOffset, pktLen, recvAddrs[i].IsOutbound);
+
+                    if (ownerExe != null)
                     {
-                        if (medTokens >= recvLen) medTokens -= recvLen;
-                        else shouldDrop = true;
+                        if (_config.HighestApps.Contains(ownerExe, StringComparer.OrdinalIgnoreCase))
+                        {
+                            Interlocked.Add(ref _highBytesWindow, pktLen);
+                        }
+                        else if (_config.MediumApps.Contains(ownerExe, StringComparer.OrdinalIgnoreCase))
+                        {
+                            if (medLimit < double.MaxValue)
+                            {
+                                if (medTokens >= pktLen) medTokens -= pktLen;
+                                else shouldDrop = true;
+                            }
+                            if (!shouldDrop) Interlocked.Add(ref _medBytesWindow, pktLen);
+                        }
+                        else if (_config.LowApps.Contains(ownerExe, StringComparer.OrdinalIgnoreCase))
+                        {
+                            if (lowLimit < double.MaxValue)
+                            {
+                                if (lowTokens >= pktLen) lowTokens -= pktLen;
+                                else shouldDrop = true;
+                            }
+                            if (!shouldDrop) Interlocked.Add(ref _lowBytesWindow, pktLen);
+                        }
                     }
-                    if (!shouldDrop) Interlocked.Add(ref _medBytesWindow, recvLen);
-                }
-                else if (_config.LowApps.Contains(ownerExe, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (lowLimit < double.MaxValue)
+
+                    if (!shouldDrop)
                     {
-                        if (lowTokens >= recvLen) lowTokens -= recvLen;
-                        else shouldDrop = true;
+                        Buffer.BlockCopy(recvBuf, recvOffset, sendBuf, sendOffset, pktLen);
+                        sendAddrs[sendCount] = recvAddrs[i];
+                        if (!skipChecksum)
+                        {
+                            WinDivertNative.WinDivertHelperCalcChecksums(sendBasePtr + sendOffset, (uint)pktLen, ref sendAddrs[sendCount], 0);
+                        }
+                        sendOffset += pktLen;
+                        sendCount++;
                     }
-                    if (!shouldDrop) Interlocked.Add(ref _lowBytesWindow, recvLen);
+
+                    recvOffset += pktLen;
+                }
+
+                if (sendCount > 0)
+                {
+                    WinDivertNative.WinDivertSendEx(_divertHandle, sendBuf, (uint)sendOffset, out _, 0, sendAddrs, (uint)(sendCount * WinDivertNative.ADDR_SIZE), IntPtr.Zero);
                 }
             }
-
-            if (!shouldDrop)
-            {
-                WinDivertNative.WinDivertHelperCalcChecksums(packet, recvLen, ref addr, 0);
-                WinDivertNative.WinDivertSend(_divertHandle, packet, recvLen, out _, ref addr);
-            }
+        }
+        finally
+        {
+            sendPin.Free();
         }
     }
 
-    private string? IdentifyProcessFromPacket(byte[] packet, int len, bool isOutbound)
+    private string? IdentifyProcessFromPacket(byte[] packet, int offset, int len, bool isOutbound)
     {
         if (len < 24) return null;
-        int ihl = (packet[0] & 0x0F) * 4;
-        byte proto = packet[9];
+        int ihl = (packet[offset] & 0x0F) * 4;
+        byte proto = packet[offset + 9];
         if (len < ihl + 4) return null;
 
-        int srcPort = (packet[ihl] << 8) | packet[ihl + 1];
-        int dstPort = (packet[ihl + 2] << 8) | packet[ihl + 3];
+        int srcPort = (packet[offset + ihl] << 8) | packet[offset + ihl + 1];
+        int dstPort = (packet[offset + ihl + 2] << 8) | packet[offset + ihl + 3];
         int localPort = isOutbound ? srcPort : dstPort;
 
         if (proto == 6 && _tcpPortMap.TryGetValue(localPort, out var tcpExe)) return tcpExe;

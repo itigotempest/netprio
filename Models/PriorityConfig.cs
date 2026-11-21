@@ -23,7 +23,9 @@ public class PriorityConfig
     public int MediumCapPercent { get; set; } = 50;
     public int LowCapPercent { get; set; } = 10;
     public double MinimumFloorMbps { get; set; } = 2.0;
+    public bool CloseToTray { get; set; } = true;
     public bool ExcludeVpnTunnelProcess { get; set; } = true;
+    public bool SkipChecksumRecalc { get; set; } = false;
 
     private static string ConfigPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

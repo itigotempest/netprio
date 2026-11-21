@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
+using NetPrio.Services;
 
 namespace NetPrio;
 
@@ -25,7 +26,8 @@ public partial class App : Application
         }
 
         bool startMinimized = Environment.GetCommandLineArgs()
-            .Any(a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase));
+            .Any(a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase))
+            || StartupTaskService.IsEnabled();
 
         _window = new MainWindow(startMinimized);
         if (!startMinimized)

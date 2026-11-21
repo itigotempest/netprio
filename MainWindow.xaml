@@ -18,7 +18,8 @@
         </NavigationView.MenuItems>
 
         <Grid Padding="24">
-            <Grid x:Name="PrioritiesPanel" RowSpacing="16">
+            <ScrollViewer x:Name="PrioritiesScroll" VerticalScrollBarVisibility="Auto">
+            <Grid x:Name="PrioritiesPanel" RowSpacing="16" MinHeight="420">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
@@ -139,13 +140,17 @@
                 </Grid>
             </Grid>
 
-            <StackPanel x:Name="SettingsPanel" Visibility="Collapsed" Spacing="16" MaxWidth="520" HorizontalAlignment="Left">
+            </ScrollViewer>
+
+            <ScrollViewer x:Name="SettingsScroll" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0">
+            <StackPanel x:Name="SettingsPanel" Spacing="16" MaxWidth="520" HorizontalAlignment="Left">
                 <ComboBox x:Name="LanguageBox" Width="260" SelectionChanged="LanguageBox_SelectionChanged">
                     <ComboBoxItem x:Name="LangAutoItem" Tag="auto" />
                     <ComboBoxItem Content="Русский" Tag="ru" />
                     <ComboBoxItem Content="English" Tag="en" />
                 </ComboBox>
                 <ToggleSwitch x:Name="AutoStartToggle" IsOn="False" Toggled="AutoStartToggle_Toggled" />
+                <ToggleSwitch x:Name="CloseToTrayToggle" IsOn="True" />
                 <ToggleSwitch x:Name="AutoSpeedToggle" IsOn="True" />
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <NumberBox x:Name="DownloadBox" Value="100" Minimum="1" SpinButtonPlacementMode="Inline" Width="180" />
@@ -155,8 +160,10 @@
                 <Slider x:Name="MediumCapSlider" Minimum="10" Maximum="90" Value="50" />
                 <Slider x:Name="LowCapSlider" Minimum="5" Maximum="50" Value="10" />
                 <ToggleSwitch x:Name="ExcludeVpnToggle" IsOn="True" />
+                <ToggleSwitch x:Name="SkipChecksumToggle" IsOn="False" />
                 <Button x:Name="SaveSettingsBtn" Style="{ThemeResource AccentButtonStyle}" Click="SaveSettings_Click" />
             </StackPanel>
+            </ScrollViewer>
         </Grid>
     </NavigationView>
 </Window>

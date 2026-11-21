@@ -32,12 +32,19 @@ jobs:
         run: |
           dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true -o ./publish-sc
 
-      - name: Package release archives
+      - name: Package release archives & read commit info
         shell: pwsh
         run: |
           $dateTag = Get-Date -Format "yyyy.MM.dd"
           $version = "v$dateTag-${{ github.run_number }}"
-          echo "RELEASE_TAG=$version" >> $env:GITHUB_ENV
+          $shortSha = git rev-parse --short HEAD$commitMsg = git log -1 --pretty=%B
+
+          "RELEASE_TAG=$version" \vert{} Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "COMMIT_SHA=$shortSha" \vert{} Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "COMMIT_MSG<<EOF" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $commitMsg \vert{} Out-File -FilePath$env:GITHUB_ENV -Encoding utf8 -Append
+          "EOF" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
           Compress-Archive -Path ./publish-fdd/* -DestinationPath "./NetPrio-$version-win-x64.zip" -Force
           Compress-Archive -Path ./publish-sc/* -DestinationPath "./NetPrio-$version-win-x64-self-contained.zip" -Force
 
@@ -47,7 +54,12 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: "NetPrio ${{ env.RELEASE_TAG }}"
           body: |
-            Automated build for `${{ env.RELEASE_TAG }}`.
+            Automated build for `${{ env.RELEASE_TAG }}` (commit `${{ env.COMMIT_SHA }}`).
+
+            ### Changes
+            ```text
+            ${{ env.COMMIT_MSG }}
+            ```
 
             **Requirements:**
             - **Windows 11 (x64)** strictly (build 22000+)

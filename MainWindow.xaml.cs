@@ -18,6 +18,7 @@ public sealed partial class MainWindow : Window
     private readonly TrayIconService _tray;
     private bool _forceClose;
     private bool _isInitializing = true;
+    private volatile bool _isWindowVisible = true;
 
     public MainWindow(bool startMinimized = false)
     {
@@ -38,6 +39,7 @@ public sealed partial class MainWindow : Window
         );
         _tray.RestoreRequested += () => DispatcherQueue.TryEnqueue(() =>
         {
+            _isWindowVisible = true;
             AppWindow.Show();
             if (AppWindow.Presenter is OverlappedPresenter p) p.Restore();
         });
@@ -52,10 +54,15 @@ public sealed partial class MainWindow : Window
 
         AppWindow.Closing += (_, args) =>
         {
-            if (!_forceClose)
+            if (!_forceClose && _config.CloseToTray)
             {
                 args.Cancel = true;
                 HideAndTrimToTray();
+            }
+            else
+            {
+                _shaper.Stop();
+                _tray.Dispose();
             }
         };
         AppWindow.Changed += (_, args) =>
@@ -69,7 +76,7 @@ public sealed partial class MainWindow : Window
             StatusBanner.Title = _shaper.IsRunning ? T("StatusActive") : T("StatusStopped");
             ToggleShaperBtn.Content = _shaper.IsRunning ? T("StopShaper") : T("StartShaper");
         });
-        _shaper.StatsUpdated += stats => { if (!AppWindow.IsVisible) return; DispatcherQueue.TryEnqueue(() =>
+        _shaper.StatsUpdated += stats => { if (!_isWindowVisible) return; DispatcherQueue.TryEnqueue(() =>
         {
             string mbps = T("Mbps");
             string lowLimitStr = stats.IsLowCapped ? $"{T("Limit")} {stats.LowLimitMbps} {mbps}" : T("NoLimit");
@@ -85,12 +92,14 @@ public sealed partial class MainWindow : Window
         LowList.ItemsSource = _config.LowApps;
 
         AutoStartToggle.IsOn = StartupTaskService.IsEnabled();
+        CloseToTrayToggle.IsOn = _config.CloseToTray;
         AutoSpeedToggle.IsOn = _config.AutoMeasureSpeed;
         DownloadBox.Value = _config.ChannelDownloadMbps;
         UploadBox.Value = _config.ChannelUploadMbps;
         MediumCapSlider.Value = _config.MediumCapPercent;
         LowCapSlider.Value = _config.LowCapPercent;
         ExcludeVpnToggle.IsOn = _config.ExcludeVpnTunnelProcess;
+        SkipChecksumToggle.IsOn = _config.SkipChecksumRecalc;
 
         LanguageBox.SelectedIndex = _config.Language switch { "ru" => 1, "en" => 2, _ => 0 };
         _isInitializing = false;
@@ -125,6 +134,7 @@ public sealed partial class MainWindow : Window
         LanguageBox.Header = T("LangHeader");
         LangAutoItem.Content = T("LangAuto");
         AutoStartToggle.Header = T("AutoStartHeader");
+        CloseToTrayToggle.Header = T("CloseToTrayHeader");
         AutoSpeedToggle.Header = T("AutoSpeedHeader");
         DownloadBox.Header = T("DownloadHeader");
         UploadBox.Header = T("UploadHeader");
@@ -132,6 +142,7 @@ public sealed partial class MainWindow : Window
         MediumCapSlider.Header = T("MedCapHeader");
         LowCapSlider.Header = T("LowCapHeader");
         ExcludeVpnToggle.Header = T("ExcludeVpnHeader");
+        SkipChecksumToggle.Header = T("SkipChecksumHeader");
         SaveSettingsBtn.Content = T("SaveSettings");
         _tray.UpdateTooltip(T("AppTitle"));
     }
@@ -157,8 +168,8 @@ public sealed partial class MainWindow : Window
     {
         if (args.SelectedItemContainer?.Tag is string tag)
         {
-            PrioritiesPanel.Visibility = tag == "priorities" ? Visibility.Visible : Visibility.Collapsed;
-            SettingsPanel.Visibility = tag == "settings" ? Visibility.Visible : Visibility.Collapsed;
+            PrioritiesScroll.Visibility = tag == "priorities" ? Visibility.Visible : Visibility.Collapsed;
+            SettingsScroll.Visibility = tag == "settings" ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -257,18 +268,21 @@ public sealed partial class MainWindow : Window
 
     private void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
+        _config.CloseToTray = CloseToTrayToggle.IsOn;
         _config.AutoMeasureSpeed = AutoSpeedToggle.IsOn;
         _config.ChannelDownloadMbps = DownloadBox.Value;
         _config.ChannelUploadMbps = UploadBox.Value;
         _config.MediumCapPercent = (int)MediumCapSlider.Value;
         _config.LowCapPercent = (int)LowCapSlider.Value;
         _config.ExcludeVpnTunnelProcess = ExcludeVpnToggle.IsOn;
+        _config.SkipChecksumRecalc = SkipChecksumToggle.IsOn;
         _config.Save();
         StatusBanner.Message = $"{T("Saved")} ({_config.ChannelDownloadMbps} {T("Mbps")})";
     }
 
     private void HideAndTrimToTray()
     {
+        _isWindowVisible = false;
         AppWindow.Hide();
         GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();

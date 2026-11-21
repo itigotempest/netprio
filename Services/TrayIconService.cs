@@ -95,7 +95,6 @@ public sealed class TrayIconService : IDisposable
 
         GetCursorPos(out var pt);
         SetForegroundWindow(_hwnd);
-        TrackPopupMenu(hMenu, 0x0100 /*TPM_RETURNCMD*/ | 0x0000, pt.X, pt.Y, 0, _hwnd, IntPtr.Zero);
         int cmd = TrackPopupMenuEx(hMenu, 0x0100, pt.X, pt.Y, _hwnd, IntPtr.Zero);
         DestroyMenu(hMenu);
 
