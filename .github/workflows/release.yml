@@ -1,0 +1,47 @@
+name: Build and Release NetPrio
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish WinUI 3 app (x64)
+        run: |
+          dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained false -o ./publish
+
+      - name: Package release archive
+        shell: pwsh
+        run: |
+          $dateTag = Get-Date -Format "yyyy.MM.dd"
+          $version = "v$dateTag-${{ github.run_number }}"
+          echo "RELEASE_TAG=$version" >> $env:GITHUB_ENV
+          Compress-Archive -Path ./publish/* -DestinationPath "./NetPrio-$version-win-x64.zip" -Force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "NetPrio ${{ env.RELEASE_TAG }}"
+          body: |
+            Automated build for `${{ env.RELEASE_TAG }}`.
+            Note: Download `WinDivert.dll` and `WinDivert64.sys` (WinDivert 2.2 x64) and place them next to `NetPrio.exe`.
+          files: ./NetPrio-*-win-x64.zip

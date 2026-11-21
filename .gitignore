@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.log
+publish/
+WinDivert.dll
+WinDivert64.sys
