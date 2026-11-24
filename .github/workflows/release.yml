@@ -1,4 +1,4 @@
-name: Build and Release NetPrio
+name: Build and Release NetPrio (Rust)
 
 on:
   push:
@@ -19,20 +19,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          dotnet-version: '10.0.x'
+          targets: x86_64-pc-windows-msvc
 
-      - name: Publish Framework-Dependent (x64)
-        run: |
-          dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained false -o ./publish-fdd
+      - name: Build Release (x64)
+        run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Publish Self-Contained (x64)
-        run: |
-          dotnet publish NetPrio.csproj -c Release -p:Platform=x64 -r win-x64 --self-contained true -o ./publish-sc
-
-      - name: Package release archives & read commit info
+      - name: Package release archive & read commit info
         shell: pwsh
         run: |
           $dateTag = Get-Date -Format "yyyy.MM.dd"
@@ -46,8 +41,11 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value $commitMsg -Encoding utf8
           Add-Content -Path $env:GITHUB_ENV -Value "EOF" -Encoding utf8
 
-          Compress-Archive -Path ./publish-fdd/* -DestinationPath "./NetPrio-$version-win-x64.zip" -Force
-          Compress-Archive -Path ./publish-sc/* -DestinationPath "./NetPrio-$version-win-x64-self-contained.zip" -Force
+          New-Item -ItemType Directory -Force -Path ./dist | Out-Null
+          Copy-Item ./target/x86_64-pc-windows-msvc/release/netprio.exe ./dist/
+          Copy-Item ./WinDivert.dll ./dist/
+          Copy-Item ./WinDivert64.sys ./dist/
+          Compress-Archive -Path ./dist/* -DestinationPath "./NetPrio-$version-win-x64.zip" -Force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -55,7 +53,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: "NetPrio ${{ env.RELEASE_TAG }}"
           body: |
-            Automated build for `${{ env.RELEASE_TAG }}` (commit `${{ env.COMMIT_SHA }}`).
+            Automated Rust build for `${{ env.RELEASE_TAG }}` (commit `${{ env.COMMIT_SHA }}`).
 
             ### Changes
             ```text
@@ -63,12 +61,6 @@ jobs:
             ```
 
             **Requirements:**
-            - **Windows 11 (x64)** strictly (build 22000+)
-            - Administrator privileges (for WinDivert)
-
-            **Which archive to download:**
-            - `NetPrio-*-win-x64.zip` — smaller build (requires **.NET 10 Desktop Runtime (x64)**)
-            - `NetPrio-*-win-x64-self-contained.zip` — standalone build (includes .NET runtime, no extra installs needed)
-
-            `WinDivert.dll` and `WinDivert64.sys` are included in both archives.
+            - **Windows 11 (x64)** with Administrator privileges (for WinDivert)
+            - Zero runtime dependencies (single standalone `netprio.exe`)
           files: ./NetPrio-*.zip

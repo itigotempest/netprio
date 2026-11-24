@@ -1,30 +1,31 @@
 # NetPrio
 
-A lightweight **Windows 11** **WinUI 3** utility for dynamic per-application network prioritization powered by **WinDivert** — works even without a QoS-capable router and alongside TUN-based VPNs.
+A lightweight **Windows 11** utility written in **Rust** (**Iced** + `tiny-skia` software renderer) for dynamic per-application network prioritization powered by **WinDivert** — works without a QoS-capable router and alongside TUN-based VPNs.
 
 ## Screenshots
 
 ### Priorities
-![NetPrio Priorities Tab](NetPrio_main_tab.png)
+![NetPrio Priorities Window](netprio_main_window.png)
 
 ### Channel & Rules
-![NetPrio Settings Tab](NetPrio_settings_tab.png)
+![NetPrio Settings Window](netprio_settings_window.png)
 
 ## Features
-- **3 Priority Tiers (`Highest` / `Medium` / `Low`)**: Move `.exe` processes between tiers or pick from running processes.
-- **Adaptive Shaping (Fast Attack / Slow Release)**: Batch packet processing via `WinDivertRecvEx`/`WinDivertSendEx` throttles background downloads (e.g., Steam, torrents) only when high-priority apps are actively using the network, then smoothly restores bandwidth.
-- **Local Proxy & VPN Friendly**: Includes a non-blocking `WINDIVERT_FLAG_SNIFF` loopback monitor for apps routed through local SOCKS5/HTTP proxies (`127.0.0.1`).
-- **System Tray, Auto-Start & Bilingual UI**: Configurable minimize-to-tray on close (`✕`), elevated auto-start via Task Scheduler, and automatic/manual **English** and **Russian** UI switching.
+- **3 Priority Tiers (`Highest` / `Medium` / `Low`)**: Move `.exe` processes between tiers or add them directly from the UI.
+- **Adaptive Shaping (Fast Attack / Slow Release)**: Lock-free O(1) port-tier tables, `WinDivertRecvEx`/`WinDivertSendEx` 64-packet batching, and automatic `SNIFF` / `SHAPE` mode switching throttle background downloads (e.g., Steam, qBittorrent) only when high-priority apps are active.
+- **Local Proxy & VPN Friendly**: Includes a dedicated `WINDIVERT_FLAG_SNIFF` loopback monitor for apps routed through local SOCKS5/HTTP proxies (`127.0.0.1`).
+- **Single Standalone Executable**: `WinDivert.dll` and `WinDivert64.sys` are embedded at build time and extracted on demand to `%LOCALAPPDATA%\NetPrio\driver\`.
+- **System Tray, Auto-Start & Bilingual UI**: Configurable minimize-to-tray on close (`✕`), elevated auto-start via Task Scheduler, memory trimming (`SetProcessWorkingSetSizeEx`), and automatic/manual **English** and **Russian** UI switching.
 
 ## Requirements
-- **Windows 11 (x64)** strictly (build 22000 or later) with Administrator privileges.
-- **.NET 10 Desktop Runtime (x64)** — required only for the standard `NetPrio-*-win-x64.zip` build (not needed for the `-self-contained.zip` build).
-- **WinDivert 2.2.2 (x64)** (`WinDivert.dll` and `WinDivert64.sys` are bundled in the repository and release archives; WinDivert is licensed under LGPLv3).
+- **Windows 11 (x64)** with Administrator privileges (required by WinDivert).
+- Zero runtime dependencies (no .NET or external runtimes required).
 
 ## Build from CLI
 ```powershell
-dotnet build -c Release -p:Platform=x64
-dotnet run -c Release -p:Platform=x64
+# Place WinDivert.dll and WinDivert64.sys in the project root to embed them
+cargo build --release
+cargo run --release
 ```
 
 Configuration is stored in `%APPDATA%\NetPrio\config.json`.

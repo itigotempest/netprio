@@ -1,7 +1,2 @@
-bin/
-obj/
-.vs/
-*.user
-*.suo
-*.log
-publish/
+/target
+**/*.rs.bk
